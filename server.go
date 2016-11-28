@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"io"
 	"log"
 	"net/http"
@@ -15,6 +16,10 @@ const (
 	defaultLogFile    = "/tmp/apiserver.log"
 	defaultListenPort = ":9090"
 )
+
+type paramsCtxType struct{}
+
+var paramsCtxKey = paramsCtxType{}
 
 func main() {
 	{
@@ -47,21 +52,32 @@ func createRouter() http.Handler {
 
 	// not found handler
 	router.NotFound = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("Detected Not Found: %s %q %s", r.URL, r.Method, r.URL, r.RemoteAddr)
+		log.Printf("Detected Not Found: %s %q %s", r.Method, r.URL, r.RemoteAddr)
 		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 	})
 
 	router.MethodNotAllowed = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("Detected Method Now Allowed: %s %q %s", r.URL, r.Method, r.URL, r.RemoteAddr)
+		log.Printf("Detected Method Now Allowed: %s %q %s", r.Method, r.URL, r.RemoteAddr)
 		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
 	})
 
 	commonChain := alice.New(loggerMW, headersMW)
 
 	// routers:
-	router.Handler(http.MethodGet, "/health", commonChain.ThenFunc(health))
+	{
+		router.Handler(http.MethodGet, "/health", commonChain.ThenFunc(health))
+
+		router.GET("/resource/:resourceID", wrap(commonChain.ThenFunc(resource)))
+	}
 
 	return router
+}
+
+func wrap(h http.Handler) httprouter.Handle {
+	return func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+		ctx := context.WithValue(r.Context(), paramsCtxKey, p)
+		h.ServeHTTP(w, r.WithContext(ctx))
+	}
 }
 
 func getOrDefault(varName, defaultVal string) string {
